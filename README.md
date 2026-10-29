@@ -185,3 +185,11 @@ Tests cover decoding, limits, HTTP, MQTT and playback control with local TCP tes
 To publish, create a version such as `v0.3.0` under **GitHub → Releases** and select **Publish release**. The workflow builds a Linux amd64/arm64 container image and binary archives with SHA-256 checksums. It pushes the image to GHCR and attaches binaries to the published release. Stable releases update `latest`; prereleases do not. Tag pushes alone do not publish.
 
 The workflow uses `GITHUB_TOKEN`. Enable package publishing and make the GHCR package public for unauthenticated image pulls. Normal CI runs on branch pushes and pull requests without publishing.
+
+## About this project
+
+This project was built with AI assistance. I'm a lazy dev.
+
+## License
+
+[MIT](LICENSE).
