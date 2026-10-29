@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2-dev
+
+- Inherit Docker's target architecture when cross-building images.
+- Smoke-test the built image on both amd64 and arm64 before publishing.
+
 ## v0.3.1-dev
 
 - Choose import persistence per request with `save`, defaulting to false.
