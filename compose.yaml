@@ -1,0 +1,32 @@
+services:
+  snapnotify:
+    build: .
+    # After publishing on GitHub, replace build with:
+    # image: ghcr.io/YOUR-OWNER/snapnotify:0.1.0
+    restart: unless-stopped
+    init: true
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 35s
+    ports:
+      # For remote access use your LAN address, or an internal reverse proxy.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./sounds:/config/sounds:ro
+    tmpfs:
+      # Decoded PCM + encoded input; increase if raising limits substantially.
+      - /tmp:size=768m,mode=1777
+    networks: [audio]
+
+networks:
+  audio:
+    external: true
+    name: ${AUDIO_NETWORK:-audio}

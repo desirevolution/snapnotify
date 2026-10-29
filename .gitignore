@@ -1,0 +1,6 @@
+/config.yaml
+/sounds/*
+!/sounds/.gitkeep
+/dist/
+/snapnotify
+/coverage.out

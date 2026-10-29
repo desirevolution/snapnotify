@@ -1,0 +1,54 @@
+const fs=require('node:fs');
+const assert=require('node:assert/strict');
+const {JSDOM,VirtualConsole}=require('jsdom');
+const root=require('node:path').join(__dirname, '..', 'web');
+const calls=[],errors=[];
+const vc=new VirtualConsole();vc.on('jsdomError', e=>errors.push(e.message));
+const dom=new JSDOM(fs.readFileSync(root+'/index.html','utf8'),{runScripts:'outside-only',url:'http://localhost:8080',virtualConsole:vc});
+const w=dom.window;
+let volume=60;
+let history=[{id:'old',label:'Old event',state:'failed',error:'Old failure',at:'2026-10-29T12:00:00Z'}];
+let lastError='Old failure';
+w.fetch=async (path,opts={})=>{
+ calls.push({path,...opts});let body;
+ if(path==='/api/sounds')body=[{id:'doorbell',filename:'<img src=x>.mp3'}];
+ else if(path==='/api/config')body={max_file_size_mb:20,max_audio_duration_seconds:120,queue_size:20,volume,version:'test'};
+ else if(path==='/api/status')body={state:'idle',current:null,queue:0,volume,mqtt:'disabled',history,last_error:lastError};
+ else if(path==='/api/history'&&opts.method==='DELETE'){history=[];lastError='';body={status:'cleared'};}
+ else if(path==='/api/volume'){volume=JSON.parse(opts.body).volume;body={volume};}
+ else body={status:'queued',job:{label:'doorbell'}};
+ return {ok:true,json:async()=>body};
+};
+w.eval(fs.readFileSync(root+'/app.js','utf8'));
+const pause=()=>new Promise(r=>setTimeout(r,20));
+(async()=>{
+ await pause();
+ const $=id=>w.document.getElementById(id);
+ assert.equal($('sound-list').querySelectorAll('button').length,1);
+ assert.equal($('sound-list').querySelectorAll('img').length,0,'filename must be text');
+ $('sound-list').querySelector('button').click();await pause();
+ assert(calls.some(c=>c.path==='/play/doorbell'&&c.method==='POST'));
+ assert($('sounds-feedback').textContent.includes('hinzugefügt'));
+ $('tab-url').click();assert.equal($('url').hidden,false);assert.equal($('sounds').hidden,true);
+ $('audio-url').value='https://example.org/gong.mp3';
+ $('url-form').requestSubmit($('url-form').querySelector('button'));await pause();
+ assert(calls.some(c=>c.path==='/play-url'&&JSON.parse(c.body).url==='https://example.org/gong.mp3'));
+ $('tab-upload').click();
+ Object.defineProperty($('audio-file'),'files',{value:[new w.File(['fake'], 'gong.wav', {type:'audio/wav'})],configurable:true});
+ $('audio-file').dispatchEvent(new w.Event('change'));
+ $('upload-form').dispatchEvent(new w.SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:$('upload-form').querySelector('button')}));await pause();
+ assert(calls.some(c=>c.path==='/play-file'&&c.body.get('file').name==='gong.wav'));
+ $('volume').value='65';$('volume').dispatchEvent(new w.Event('input'));
+ $('volume-form').requestSubmit($('volume-form').querySelector('button'));await pause();
+ assert.equal(volume,65);assert($('volume-feedback').textContent.includes('65 %'));
+ assert.equal($('clear-history').disabled,false);
+ $('clear-history').click();await pause();
+ assert(calls.some(c=>c.path==='/api/history'&&c.method==='DELETE'));
+ assert.equal($('history').querySelector('.empty').textContent,'Noch keine Meldungen.');
+ assert.equal($('last-error').hidden,true);
+ assert.equal($('clear-history').disabled,true);
+ assert(!w.document.body.textContent.includes('Ein Sound. Überall gehört.'));
+ assert.equal(errors.length,0,errors.join('\n'));
+ console.log('PASS: sounds, URL, upload, volume, clear history, tabs and escaped filenames (JSDOM)');
+ dom.window.close();
+})().catch(e=>{dom.window.close();console.error(e);process.exitCode=1;});

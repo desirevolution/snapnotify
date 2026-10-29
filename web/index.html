@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>snapnotify</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<main>
+  <header><div class="brand"><span class="logo" aria-hidden="true">♫</span><div><h1>snapnotify</h1></div></div><span class="connection" id="connection">Verbinde …</span></header>
+  <section class="player" aria-label="Wiedergabestatus"><span class="pulse" id="pulse" aria-hidden="true"></span><div class="now"><span class="eyebrow" id="state">Bereit</span><strong id="current">Keine Wiedergabe</strong></div><div class="queue"><strong id="queued">0</strong><span>wartend</span></div></section>
+  <section class="volume-control" aria-label="Notification-Lautstärke"><form id="volume-form"><label for="volume">Notification-Lautstärke <output id="volume-value" for="volume">60 %</output></label><div class="volume-input"><input id="volume" type="range" min="0" max="100" step="1" value="60"><button type="submit">Übernehmen</button></div><p class="hint">Gilt ab der nächsten Meldung · bis zum Neustart</p><p class="feedback" id="volume-feedback" role="status"></p></form></section>
+  <section class="card">
+    <div class="tabs" role="tablist" aria-label="Audioquelle">
+      <button id="tab-sounds" role="tab" aria-selected="true" aria-controls="sounds">Sounds</button>
+      <button id="tab-url" role="tab" aria-selected="false" aria-controls="url" tabindex="-1">URL</button>
+      <button id="tab-upload" role="tab" aria-selected="false" aria-controls="upload" tabindex="-1">Upload</button>
+    </div>
+    <div id="sounds" role="tabpanel" aria-labelledby="tab-sounds"><div class="section-title"><h2>Deine Sounds</h2><span id="sound-count"></span></div><p class="hint">Konfigurierte Dateien mit einem Klick einreihen.</p><div id="sound-list"><p class="empty">Sounds werden geladen …</p></div><p class="feedback" id="sounds-feedback" role="status"></p></div>
+    <div id="url" role="tabpanel" aria-labelledby="tab-url" hidden><h2>Sound von einer URL</h2><p class="hint">Eine direkte HTTP- oder HTTPS-Adresse zu einer Audiodatei.</p><form id="url-form"><label for="audio-url">Audio-URL</label><input id="audio-url" type="url" placeholder="https://example.org/gong.mp3" required autocomplete="off" maxlength="4096"><button class="primary" type="submit">Herunterladen & abspielen <span aria-hidden="true">↗</span></button></form><p class="feedback" id="url-feedback" role="status"></p></div>
+    <div id="upload" role="tabpanel" aria-labelledby="tab-upload" hidden><h2>Datei abspielen</h2><p class="hint">Einmalig hochladen. Nach der Wiedergabe automatisch gelöscht.</p><form id="upload-form"><label class="drop" id="drop" for="audio-file"><span aria-hidden="true" class="upload-symbol">↑</span><strong id="file-label">Datei auswählen oder hier ablegen</strong><span>MP3 · WAV · Ogg Vorbis</span><input id="audio-file" type="file" accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg" required></label><button class="primary" type="submit">Hochladen & abspielen <span aria-hidden="true">↗</span></button></form><p class="feedback" id="upload-feedback" role="status"></p></div>
+  </section>
+  <p class="limits" id="limits"></p>
+  <section class="activity"><div class="section-title"><h2>Letzte Meldungen</h2><button id="clear-history" type="button" class="secondary" disabled>Leeren</button></div><p class="error-banner" id="last-error" role="status" hidden></p><p class="feedback" id="history-feedback" role="status"></p><ol id="history"><li class="empty">Noch keine Meldungen.</li></ol></section>
+  <footer><span id="version">snapnotify</span><span id="mqtt"></span></footer>
+</main>
+</body></html>

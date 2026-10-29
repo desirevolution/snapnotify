@@ -1,0 +1,9 @@
+.git
+.github
+dist
+sounds/*
+config.yaml
+*.tar.gz
+*.zip
+testdata
+*_test.go

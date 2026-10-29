@@ -1,0 +1,40 @@
+# Paths are relative to this config file; secrets can be overridden via
+# SNAPNOTIFY_MPD_PASSWORD and SNAPNOTIFY_MQTT_PASSWORD.
+http:
+  listen: ":8080"
+
+audio:
+  directory: ./sounds
+  volume: 60
+
+snapcast:
+  control_address: snapserver:1705
+  audio_address: snapserver:4953
+  stream: notifications
+  buffer_ms: 350       # Must match snapserver's stream buffer.
+  settle_ms: 150       # Extra time for stream switching / draining.
+
+mpd:
+  address: ""             # Optional. Set to "mpd:6600" to pause/resume MPD.
+  password: ""
+
+mqtt:
+  enabled: false
+  broker: tcp://mosquitto:1883 # ssl://mosquitto:8883 uses system trust roots.
+  topic: notifications/play
+  client_id: snapnotify      # Unique per snapnotify instance.
+  username: ""
+  password: ""
+
+limits:
+  queue_size: 20
+  max_file_size_mb: 20       # MiB; original file, including local files.
+  max_audio_duration_seconds: 120
+  download_timeout_seconds: 30
+
+# Only these configured relative paths can be triggered by ID.
+# Put your audio files in ./sounds and add mappings, for example:
+# sounds:
+#   doorbell: doorbell.mp3
+#   washing_done: washing-done.ogg
+sounds: {}
