@@ -7,3 +7,5 @@
 .volume-control{margin:-6px 0 22px;padding:0 3px}.volume-control label{display:flex;justify-content:space-between}.volume-control output{color:var(--accent);font-variant-numeric:tabular-nums}.volume-input{display:flex;align-items:center;gap:18px}.volume-input input{flex:1;min-width:0;accent-color:var(--accent)}.volume-input button{border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:7px 12px;font-size:12px}.volume-control .hint{font-size:11px;margin:5px 0 0}.volume-control .feedback{font-size:12px;min-height:0;margin:4px 0 0}
 
 .secondary{border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:6px 12px;font-size:12px}.secondary:disabled{cursor:default}.activity .feedback{min-height:0;margin:0 0 8px}
+
+label.save-option{display:flex;align-items:center;gap:8px;margin:12px 0 16px;font-size:13px;font-weight:400}.save-option input{accent-color:var(--accent)}

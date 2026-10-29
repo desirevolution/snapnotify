@@ -12,11 +12,12 @@ Play audio notifications through Snapcast using a web UI, HTTP or MQTT. Supports
 1. Copy `config.example.yaml` to `config.yaml` and set the Snapserver addresses.
 2. Add a notification source to Snapserver, as shown below.
 3. Connect snapnotify and Snapserver to the same Docker network. The Compose files use an existing network named `audio`. Create it if needed and attach Snapserver to it, or set `AUDIO_NETWORK` to your existing network name.
-4. Put audio files in `sounds/` and add their IDs to the configuration. URLs and uploads work without configured files.
+4. Put audio files in `sounds/`; their IDs are discovered from filenames automatically. Add optional aliases in the configuration. URLs and uploads work without local files.
 5. Start the published image:
 
 ```sh
 cp config.example.yaml config.yaml
+mkdir -p sounds
 # Edit config.yaml before starting.
 docker compose -f compose.yml pull
 docker compose -f compose.yml up -d
@@ -32,7 +33,7 @@ For a local build instead:
 docker compose -f compose.dev.yml up -d --build
 ```
 
-Both Compose files are standalone alternatives. Do not combine them. Configuration and sound files must be readable by container user `65532:65532`. Create `config.yaml` as a file before starting; configuration changes require a restart.
+Both Compose files are standalone alternatives. Do not combine them. Files must be readable by the selected container user (default `65532:65532`). Create `config.yaml` as a file before starting; configuration changes require a restart.
 
 ### Snapserver
 
@@ -73,6 +74,7 @@ All options and defaults are listed in `config.example.yaml`. Unknown options ar
 audio:
   directory: ./sounds
   volume: 60
+  scan_directory: true
 
 sounds:
   doorbell: doorbell.mp3
@@ -80,6 +82,57 @@ sounds:
 ```
 
 The audio directory is relative to the configuration file. Sound paths are relative to that directory. Each sound ID can be triggered through the UI, HTTP or MQTT.
+
+### Sound discovery
+
+Directory scanning is enabled by default. It discovers `.mp3`, `.wav` and `.ogg` files directly inside `audio.directory`, without a restart. Subdirectories, hidden files and symbolic links are not scanned. Explicit mappings can still reference relative paths in subdirectories.
+
+IDs use the filename without its extension, converted to lowercase. Other characters become underscores, leading/trailing separators are removed, and IDs are limited to 64 characters. For example, `Door Bell.mp3` becomes `door_bell`. Files listed in the manual mapping keep their configured IDs and are not listed a second time.
+
+Manual IDs take priority. Files whose generated IDs collide receive stable filename-based hash suffixes, so no file is silently chosen instead of another. Use an explicit mapping if you need a particular ID. Set `audio.scan_directory: false` to use manual mappings only.
+
+`GET /api/ids` returns all available IDs as a sorted JSON array:
+
+```json
+["doorbell", "mail"]
+```
+
+`GET /api/sounds` includes filenames and a `source` field (`mapping` or `directory`). The UI refreshes the sound list automatically. File extensions are used for discovery; actual audio is validated when played.
+
+### Saving uploads and URL downloads
+
+Saving is selected independently for each API call or with the **Save to local sounds** checkbox in the UI. It defaults to `false`; there is no global save setting. Saving requires `audio.scan_directory: true`.
+
+For a URL, add a JSON boolean:
+
+```sh
+curl -X POST http://localhost:8080/play-url \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.org/notification.mp3","save":true}'
+```
+
+For an upload, add a multipart field:
+
+```sh
+curl -X POST http://localhost:8080/play-file \
+  -F 'file=@notification.wav' -F 'save=true'
+```
+
+The upload `save` field accepts exactly `true` or `false` and may appear before or after `file`. Omit it or send `false` for temporary playback. The UI checkbox starts unchecked and resets after a successful request.
+
+Validated original audio files are stored in `audio.directory` and become local sounds automatically. The manual mapping is never edited.
+
+Saved filenames contain a readable name and a content-hash suffix, for example `doorbell-a1b2c3d4e5f6.mp3`. The extension comes from the detected audio format. Repeating the same name and content reuses the file; existing files are never overwritten. The `202` response includes `job.saved_sound` with the reusable `id` and `filename`.
+
+Invalid files and requests rejected before queue admission are not saved. After a successful import, the file remains even if playback later fails. Saved files survive restarts and stay until removed manually; a read-only mounted configuration is sufficient because no generated mappings are written there.
+
+The sounds directory must be writable when saving is enabled. Both Compose files mount it read/write. To run as your host user, for example:
+
+```sh
+SNAPNOTIFY_UID=$(id -u) SNAPNOTIFY_GID=$(id -g) docker compose -f compose.yml up -d
+```
+
+Calls without `save: true` remain temporary, independently of any previous request.
 
 Default limits are 20 queued notifications, 20 MiB per file, 120 seconds of audio and a 30-second URL preparation timeout. Files are decoded before entering the queue. Unsupported formats, including Ogg Opus, are rejected.
 
@@ -107,7 +160,7 @@ Use `ssl://host:8883` for TLS with system CA verification. Set credentials in th
 
 ## Usage
 
-The UI supports configured sounds, direct URLs and single-file uploads. Volume changes apply to the next notification and reset to the configured value on restart. **Clear** removes recent notifications and the last error without interrupting playback or changing the queue.
+The UI supports configured sounds, direct URLs and single-file uploads. Volume changes apply to the next notification and reset to the configured value on restart. Successful saved imports appear immediately in the sound list. **Clear** removes recent notifications and the last error without interrupting playback or changing the queue.
 
 ### HTTP
 
@@ -132,14 +185,15 @@ Playback requests return `202` once the audio is prepared and queued. Later play
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/sounds` | Configured sound IDs and filenames |
+| `GET /api/ids` | All manual and discovered sound IDs |
+| `GET /api/sounds` | Sound IDs, filenames and source |
 | `GET /api/status` | Playback, queue, MQTT status and recent results |
 | `GET /api/volume` | Current and configured default volume |
 | `GET /api/config` | Public settings and version |
 | `DELETE /api/history` | Clear recent results and the last error |
 | `GET /healthz` | Process health; does not check external services |
 
-URLs must point to finite HTTP/HTTPS audio files, without embedded credentials. Internal URLs are allowed. Uploads and downloads are temporary and deleted after playback or failure.
+URLs must point to finite HTTP/HTTPS audio files, without embedded credentials. Internal URLs are allowed. Uploads and downloads are temporary unless that request sets `save` to `true`.
 
 ### MQTT
 
@@ -186,10 +240,10 @@ To publish, create a version such as `v0.3.0` under **GitHub → Releases** and 
 
 The workflow uses `GITHUB_TOKEN`. Enable package publishing and make the GHCR package public for unauthenticated image pulls. Normal CI runs on branch pushes and pull requests without publishing.
 
-## About this project
-
-This project was built with AI assistance. I'm a lazy dev.
-
-## License
-
-[MIT](LICENSE).
+-## About this project
+-
+-This project was built with AI assistance. I'm a lazy dev.
+-
+-## License
+-
+-[MIT](LICENSE).

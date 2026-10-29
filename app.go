@@ -110,13 +110,23 @@ func (a *App) event(job Job, state string, err error) {
 	}
 }
 func (a *App) enqueue(job Job) error {
+	return a.enqueuePrepared(&job)
+}
+
+func (a *App) enqueuePrepared(job *Job) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closing || a.ctx.Err() != nil {
 		return apiError{503, "service is stopping"}
 	}
+	if len(a.jobs) >= cap(a.jobs) {
+		return apiError{429, "notification queue is full"}
+	}
+	if err := a.saveOriginal(job); err != nil {
+		return err
+	}
 	select {
-	case a.jobs <- job:
+	case a.jobs <- *job:
 		return nil
 	default:
 		return apiError{429, "notification queue is full"}

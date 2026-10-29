@@ -24,14 +24,38 @@ const sampleRate = 48000
 const bytesPerSecond = sampleRate * 4
 
 type Job struct {
-	ID              string  `json:"id"`
-	Label           string  `json:"label"`
-	DurationSeconds float64 `json:"duration_seconds"`
-	Path            string  `json:"-"`
+	ID                string  `json:"id"`
+	Label             string  `json:"label"`
+	DurationSeconds   float64 `json:"duration_seconds"`
+	Path              string  `json:"-"`
+	SavedSound        *Sound  `json:"saved_sound,omitempty"`
+	originalPath      string
+	originalExtension string
+}
+
+func (j Job) cleanup() {
+	if j.Path != "" {
+		os.Remove(j.Path)
+	}
+	if j.originalPath != "" {
+		os.Remove(j.originalPath)
+	}
 }
 
 func (a *App) local(ctx context.Context, id string) (Job, error) {
 	name, ok := a.cfg.Sounds[id]
+	if !ok && a.cfg.Audio.ScanDirectory {
+		sounds, err := a.sounds()
+		if err != nil {
+			return Job{}, err
+		}
+		for _, sound := range sounds {
+			if sound.ID == id {
+				name, ok = sound.Filename, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return Job{}, apiError{404, "unknown sound ID"}
 	}
@@ -57,11 +81,20 @@ func (a *App) local(ctx context.Context, id string) (Job, error) {
 }
 
 func (a *App) prepare(ctx context.Context, source io.Reader, label string) (job Job, err error) {
+	return a.prepareInput(ctx, source, label, false)
+}
+
+func (a *App) prepareInput(ctx context.Context, source io.Reader, label string, keepOriginal bool) (job Job, err error) {
 	input, err := os.CreateTemp(a.tempDir, "input-*")
 	if err != nil {
 		return job, err
 	}
-	defer func() { input.Close(); os.Remove(input.Name()) }()
+	defer func() {
+		input.Close()
+		if err != nil || !keepOriginal {
+			os.Remove(input.Name())
+		}
+	}()
 	n, err := io.Copy(input, io.LimitReader(&contextReader{ctx, source}, a.cfg.maxBytes()+1))
 	if err != nil {
 		return job, err
@@ -74,6 +107,16 @@ func (a *App) prepare(ctx context.Context, source io.Reader, label string) (job 
 	}
 	if _, err = input.Seek(0, 0); err != nil {
 		return job, err
+	}
+	header := make([]byte, 12)
+	io.ReadFull(input, header)
+	input.Seek(0, 0)
+	ext := ".mp3"
+	if bytes.Equal(header[:4], []byte("RIFF")) {
+		ext = ".wav"
+	}
+	if bytes.Equal(header[:4], []byte("OggS")) {
+		ext = ".ogg"
 	}
 	output, err := os.CreateTemp(a.tempDir, "pcm-*")
 	if err != nil {
@@ -89,7 +132,12 @@ func (a *App) prepare(ctx context.Context, source io.Reader, label string) (job 
 	if err != nil {
 		return job, apiError{422, err.Error()}
 	}
-	return Job{ID: newID(), Label: label, DurationSeconds: float64(frames) / sampleRate, Path: output.Name()}, nil
+	job = Job{ID: newID(), Label: label, DurationSeconds: float64(frames) / sampleRate, Path: output.Name()}
+	if keepOriginal {
+		job.originalPath = input.Name()
+		job.originalExtension = ext
+	}
+	return job, nil
 }
 
 // Decode without importing beep/speaker: no Oto, ALSA, CGO or audio device.
@@ -192,7 +240,7 @@ func audioURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-func (a *App) fromURL(ctx context.Context, raw string) (Job, error) {
+func (a *App) fromURL(ctx context.Context, raw string, save bool) (Job, error) {
 	u, err := audioURL(raw)
 	if err != nil {
 		return Job{}, err
@@ -222,5 +270,5 @@ func (a *App) fromURL(ctx context.Context, raw string) (Job, error) {
 		return Job{}, apiError{413, "file size limit exceeded"}
 	}
 	label := u.Hostname() + "/" + filepath.Base(strings.TrimSuffix(u.Path, "/"))
-	return a.prepare(ctx, resp.Body, label)
+	return a.prepareInput(ctx, resp.Body, label, save)
 }

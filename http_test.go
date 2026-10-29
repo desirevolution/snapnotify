@@ -231,7 +231,7 @@ func TestDownloadErrorsAndRedirects(t *testing.T) {
 	} {
 		a := apiApp(t)
 		s := httptest.NewServer(handler)
-		_, err := a.fromURL(context.Background(), s.URL)
+		_, err := a.fromURL(context.Background(), s.URL, false)
 		s.Close()
 		if err == nil {
 			t.Fatal("invalid download accepted")

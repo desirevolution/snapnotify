@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -74,19 +73,27 @@ func (a *App) handler() http.Handler {
 	})
 	m.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, a.snapshot()) })
 	m.HandleFunc("GET /api/sounds", func(w http.ResponseWriter, r *http.Request) {
-		type sound struct {
-			ID       string `json:"id"`
-			Filename string `json:"filename"`
+		sounds, err := a.sounds()
+		if err != nil {
+			fail(w, err)
+			return
 		}
-		sounds := []sound{}
-		for id, name := range a.cfg.Sounds {
-			sounds = append(sounds, sound{id, name})
-		}
-		sort.Slice(sounds, func(i, j int) bool { return sounds[i].ID < sounds[j].ID })
 		writeJSON(w, 200, sounds)
 	})
+	m.HandleFunc("GET /api/ids", func(w http.ResponseWriter, r *http.Request) {
+		sounds, err := a.sounds()
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		ids := make([]string, 0, len(sounds))
+		for _, sound := range sounds {
+			ids = append(ids, sound.ID)
+		}
+		writeJSON(w, 200, ids)
+	})
 	m.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"max_file_size_mb": a.cfg.Limits.MaxFileSizeMB, "max_audio_duration_seconds": a.cfg.Limits.MaxAudioDurationSeconds, "queue_size": a.cfg.Limits.QueueSize, "volume": a.notificationVolume(), "version": version})
+		writeJSON(w, 200, map[string]any{"max_file_size_mb": a.cfg.Limits.MaxFileSizeMB, "max_audio_duration_seconds": a.cfg.Limits.MaxAudioDurationSeconds, "queue_size": a.cfg.Limits.QueueSize, "volume": a.notificationVolume(), "version": version, "scan_directory": a.cfg.Audio.ScanDirectory})
 	})
 	m.HandleFunc("GET /api/volume", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]int{"volume": a.notificationVolume(), "default_volume": a.cfg.Audio.Volume})
@@ -114,12 +121,10 @@ func (a *App) handler() http.Handler {
 			err = r.Context().Err()
 		}
 		if err == nil {
-			err = a.enqueue(job)
+			err = a.enqueuePrepared(&job)
 		}
 		if err != nil {
-			if job.Path != "" {
-				os.Remove(job.Path)
-			}
+			job.cleanup()
 			fail(w, err)
 			return
 		}
@@ -136,7 +141,8 @@ func (a *App) handler() http.Handler {
 	})
 	m.HandleFunc("POST /play-url", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
-			URL string `json:"url"`
+			URL  string `json:"url"`
+			Save bool   `json:"save"`
 		}
 		if err := readJSON(w, r, &payload); err != nil {
 			fail(w, err)
@@ -147,7 +153,11 @@ func (a *App) handler() http.Handler {
 			return
 		}
 		defer a.release()
-		job, err := a.fromURL(r.Context(), payload.URL)
+		if payload.Save && !a.cfg.Audio.ScanDirectory {
+			fail(w, apiError{400, "saving requires audio.scan_directory: true"})
+			return
+		}
+		job, err := a.fromURL(r.Context(), payload.URL, payload.Save)
 		accepted(w, r, job, err)
 	})
 	m.HandleFunc("POST /play-file", func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +174,7 @@ func (a *App) handler() http.Handler {
 		}
 		var job Job
 		seen := false
+		save, saveSeen := false, false
 		for {
 			part, e := reader.NextPart()
 			if e == io.EOF {
@@ -173,20 +184,51 @@ func (a *App) handler() http.Handler {
 				err = e
 				break
 			}
-			if part.FormName() != "file" || seen {
-				part.Close()
-				err = apiError{400, "send exactly one multipart field named file"}
-				break
+			switch part.FormName() {
+			case "file":
+				if seen {
+					err = apiError{400, "send exactly one file field"}
+					part.Close()
+					break
+				}
+				seen = true
+				// Keep the source until all fields are read: save may follow file.
+				job, err = a.prepareInput(r.Context(), part, filepath.Base(part.FileName()), true)
+			case "save":
+				if saveSeen || part.FileName() != "" {
+					err = apiError{400, "send at most one boolean save field"}
+					part.Close()
+					break
+				}
+				saveSeen = true
+				value, e := io.ReadAll(io.LimitReader(part, 17))
+				if e != nil {
+					err = e
+					break
+				}
+				if string(value) != "true" && string(value) != "false" {
+					err = apiError{400, "save must be true or false"}
+					break
+				}
+				save = string(value) == "true"
+			default:
+				err = apiError{400, "expected file and optional save fields"}
 			}
-			seen = true
-			job, err = a.prepare(r.Context(), part, filepath.Base(part.FileName()))
 			part.Close()
 			if err != nil {
 				break
 			}
 		}
+
 		if !seen && err == nil {
 			err = apiError{400, "file field missing"}
+		}
+		if err == nil && save && !a.cfg.Audio.ScanDirectory {
+			err = apiError{400, "saving requires audio.scan_directory: true"}
+		}
+		if err == nil && !save {
+			os.Remove(job.originalPath)
+			job.originalPath = ""
 		}
 		accepted(w, r, job, err)
 	})

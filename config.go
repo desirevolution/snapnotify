@@ -19,8 +19,9 @@ type Config struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"http"`
 	Audio struct {
-		Directory string `yaml:"directory"`
-		Volume    int    `yaml:"volume"`
+		Directory     string `yaml:"directory"`
+		Volume        int    `yaml:"volume"`
+		ScanDirectory bool   `yaml:"scan_directory"`
 	} `yaml:"audio"`
 	Snapcast struct {
 		ControlAddress string `yaml:"control_address"`
@@ -54,6 +55,7 @@ func defaultConfig() Config {
 	var c Config
 	c.HTTP.Listen = ":8080"
 	c.Audio.Directory, c.Audio.Volume = "./sounds", 60
+	c.Audio.ScanDirectory = true
 	c.Snapcast.ControlAddress, c.Snapcast.AudioAddress = "snapserver:1705", "snapserver:4953"
 	c.Snapcast.Stream, c.Snapcast.BufferMS, c.Snapcast.SettleMS = "notifications", 350, 150
 	c.MQTT.Topic, c.MQTT.ClientID = "notifications/play", "snapnotify"

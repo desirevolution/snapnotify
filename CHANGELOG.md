@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.1-dev
+
+- Choose import persistence per request with `save`, defaulting to false.
+- Add unchecked save checkboxes to the URL and upload forms.
+- Remove global import save options.
+
+## v0.3.0-dev
+
+- Discover local sound files automatically and derive IDs from filenames.
+- Add `GET /api/ids`; include discovered files in the UI, HTTP and MQTT lookups.
+- Optionally save validated uploads and URL downloads as reusable local sounds.
+- Keep manual mappings unchanged; handle ID conflicts and duplicate imports without overwriting files.
+- Refresh the UI sound library automatically and show saved IDs after importing.
+
 ## v0.2.1-dev
 
 - Use English throughout the UI and documentation.

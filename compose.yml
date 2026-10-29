@@ -3,7 +3,7 @@ services:
     image: ghcr.io/desirevolution/snapnotify:latest
     restart: unless-stopped
     init: true
-    user: "65532:65532"
+    user: "${SNAPNOTIFY_UID:-65532}:${SNAPNOTIFY_GID:-65532}"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -18,7 +18,8 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      - ./sounds:/config/sounds:ro
+      # The selected user needs write access when imports saving is enabled.
+      - ./sounds:/config/sounds
     tmpfs:
       # Decoded PCM + encoded input; increase if raising limits substantially.
       - /tmp:size=768m,mode=1777
