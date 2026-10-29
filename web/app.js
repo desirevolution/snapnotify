@@ -10,10 +10,10 @@ tabs.forEach((tab, i) => {
 });
 let config = null;
 let volumeDirty = false;
-$('volume').addEventListener('input', () => {volumeDirty = true;$('volume-value').textContent = `${$('volume').value} %`;});
+$('volume').addEventListener('input', () => {volumeDirty = true;$('volume-value').textContent = `${$('volume').value}%`;});
 $('volume-form').addEventListener('submit', async event => {
   event.preventDefault();const button = event.submitter;button.disabled = true;
-  try {const result = await request('/api/volume', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({volume:Number($('volume').value)})});volumeDirty = false;feedback('volume-feedback', `${result.volume} % ab der nächsten Meldung.`);}
+  try {const result = await request('/api/volume', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({volume:Number($('volume').value)})});volumeDirty = false;feedback('volume-feedback', `${result.volume}% from the next notification.`);}
   catch (error) {feedback('volume-feedback', error.message, true);}
   finally {button.disabled = false;}
 });
@@ -25,46 +25,46 @@ async function request(path, options) {
 }
 function feedback(id, text, error = false) {const el = $(id);el.textContent = text;el.classList.toggle('error', error);}
 async function submit(button, feedbackID, action) {
-  const old = button.textContent;button.disabled = true;button.textContent = 'Wird vorbereitet …';feedback(feedbackID, '');
-  try {const result = await action();feedback(feedbackID, `„${result.job.label}“ zur Warteschlange hinzugefügt.`);poll();}
+  const old = button.textContent;button.disabled = true;button.textContent = 'Preparing…';feedback(feedbackID, '');
+  try {const result = await action();feedback(feedbackID, `Queued: ${result.job.label}.`);poll();}
   catch (error) {feedback(feedbackID, error.message, true);}
   finally {button.disabled = false;button.textContent = old;}
 }
 function renderSounds(sounds) {
   $('sound-list').replaceChildren();$('sound-count').textContent = `${sounds.length} Sounds`;
-  if (!sounds.length) {const p = document.createElement('p');p.className = 'empty';p.textContent = 'Noch keine Sounds konfiguriert. URL und Upload sind bereits nutzbar.';$('sound-list').append(p);}
+  if (!sounds.length) {const p = document.createElement('p');p.className = 'empty';p.textContent = 'No local sounds configured. Use a URL or upload a file.';$('sound-list').append(p);}
   for (const sound of sounds) {
     const row = document.createElement('div');row.className = 'sound';
     const info = document.createElement('div');info.className = 'sound-info';
     const name = document.createElement('strong');name.textContent = sound.id;
     const file = document.createElement('small');file.textContent = sound.filename;info.append(name, file);
-    const button = document.createElement('button');button.type = 'button';button.textContent = '▶ Abspielen';button.setAttribute('aria-label', `${sound.id} abspielen`);
+    const button = document.createElement('button');button.type = 'button';button.textContent = '▶ Play';button.setAttribute('aria-label', `Play ${sound.id}`);
     button.addEventListener('click', () => submit(button, 'sounds-feedback', () => request(`/play/${encodeURIComponent(sound.id)}`, {method: 'POST'})));
     row.append(info, button);$('sound-list').append(row);
   }
 }
-$('url-form').addEventListener('submit', event => {event.preventDefault();const url = $('audio-url').value.trim();if (!/^https?:\/\//i.test(url)) {feedback('url-feedback', 'Bitte eine HTTP- oder HTTPS-URL eingeben.', true);return;}submit(event.submitter, 'url-feedback', () => request('/play-url', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url})}));});
-function selectedFile() {const file = $('audio-file').files[0];$('file-label').textContent = file ? file.name : 'Datei auswählen oder hier ablegen';}
+$('url-form').addEventListener('submit', event => {event.preventDefault();const url = $('audio-url').value.trim();if (!/^https?:\/\//i.test(url)) {feedback('url-feedback', 'Enter an HTTP or HTTPS URL.', true);return;}submit(event.submitter, 'url-feedback', () => request('/play-url', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url})}));});
+function selectedFile() {const file = $('audio-file').files[0];$('file-label').textContent = file ? file.name : 'Choose a file or drop it here';}
 $('audio-file').addEventListener('change', selectedFile);
 for (const name of ['dragenter', 'dragover']) $('drop').addEventListener(name, event => {event.preventDefault();$('drop').classList.add('dragging');});
 for (const name of ['dragleave', 'drop']) $('drop').addEventListener(name, () => $('drop').classList.remove('dragging'));
-$('drop').addEventListener('drop', event => {event.preventDefault();if (event.dataTransfer.files.length !== 1) {feedback('upload-feedback', 'Bitte genau eine Datei ablegen.', true);return;}$('audio-file').files = event.dataTransfer.files;selectedFile();});
-$('upload-form').addEventListener('submit', event => {event.preventDefault();const file = $('audio-file').files[0];if (!file) return;if (config && file.size > config.max_file_size_mb * 1024 * 1024) {feedback('upload-feedback', 'Die Datei überschreitet das Größenlimit.', true);return;}const data = new FormData();data.append('file', file);submit(event.submitter, 'upload-feedback', () => request('/play-file', {method: 'POST', body: data}));});
+$('drop').addEventListener('drop', event => {event.preventDefault();if (event.dataTransfer.files.length !== 1) {feedback('upload-feedback', 'Drop one file at a time.', true);return;}$('audio-file').files = event.dataTransfer.files;selectedFile();});
+$('upload-form').addEventListener('submit', event => {event.preventDefault();const file = $('audio-file').files[0];if (!file) return;if (config && file.size > config.max_file_size_mb * 1024 * 1024) {feedback('upload-feedback', 'The file exceeds the size limit.', true);return;}const data = new FormData();data.append('file', file);submit(event.submitter, 'upload-feedback', () => request('/play-file', {method: 'POST', body: data}));});
 let lastHistory = '';
 let polling = false;
 let statusEpoch = 0;
 function renderHistory(s) {
  $('last-error').hidden = !s.last_error;
- $('last-error').textContent = s.last_error ? `Letzter Fehler: ${s.last_error}` : '';
+ $('last-error').textContent = s.last_error ? `Last error: ${s.last_error}` : '';
  $('clear-history').disabled = !s.history.length && !s.last_error;
  const key = JSON.stringify(s.history);
  if (key === lastHistory) return;
  lastHistory = key;
  $('history').replaceChildren();
- if (!s.history.length) {const li = document.createElement('li');li.className='empty';li.textContent='Noch keine Meldungen.';$('history').append(li);return;}
+ if (!s.history.length) {const li = document.createElement('li');li.className='empty';li.textContent='No notifications yet.';$('history').append(li);return;}
  for (const e of s.history) {
   const li=document.createElement('li');li.className=`history-row ${e.state}`;
-  const result=document.createElement('span');result.className='result';result.textContent=e.state==='completed'?'✓':'!';result.setAttribute('aria-label',e.state==='completed'?'Abgeschlossen':'Fehlgeschlagen');
+  const result=document.createElement('span');result.className='result';result.textContent=e.state==='completed'?'✓':'!';result.setAttribute('aria-label',e.state==='completed'?'Completed':'Failed');
   const details=document.createElement('div');details.className='details';
   const label=document.createElement('strong');label.textContent=e.label;details.append(label);
   if(e.error){const error=document.createElement('small');error.textContent=e.error;details.append(error);}
@@ -74,24 +74,24 @@ function renderHistory(s) {
 }
 $('clear-history').addEventListener('click',async()=>{
  const button=$('clear-history');button.disabled=true;
- try {await request('/api/history',{method:'DELETE'});statusEpoch++;renderHistory({history:[],last_error:''});feedback('history-feedback','Meldungen gelöscht.');poll();}
+ try {await request('/api/history',{method:'DELETE'});statusEpoch++;renderHistory({history:[],last_error:''});feedback('history-feedback','History cleared.');poll();}
  catch(error){feedback('history-feedback',error.message,true);button.disabled=false;}
 });
 async function poll() {
   if (polling) return;polling = true;const epoch = statusEpoch;
   try {
-    const s = await request('/api/status');if(epoch!==statusEpoch)return;$('connection').textContent = 'Verbunden';$('connection').classList.remove('offline');
-    if (!volumeDirty) {$('volume').value = s.volume;$('volume-value').textContent = `${s.volume} %`;}
-    $('state').textContent = ({idle:'Bereit', starting:'Wird gestartet', playing:'Wiedergabe', restoring:'Wird wiederhergestellt'})[s.state] || s.state;
-    $('current').textContent = s.current?.label || 'Keine Wiedergabe';$('queued').textContent = s.queue;$('pulse').classList.toggle('active', s.state !== 'idle');
-    $('mqtt').textContent = s.mqtt === 'disabled' ? 'MQTT aus' : `MQTT: ${{connected:'verbunden', connecting:'verbindet …', disconnected:'getrennt', 'subscription failed':'Abonnement fehlgeschlagen'}[s.mqtt] || s.mqtt}`;
+    const s = await request('/api/status');if(epoch!==statusEpoch)return;$('connection').textContent = 'Connected';$('connection').classList.remove('offline');
+    if (!volumeDirty) {$('volume').value = s.volume;$('volume-value').textContent = `${s.volume}%`;}
+    $('state').textContent = ({idle:'Idle', starting:'Starting', playing:'Playing', restoring:'Restoring'})[s.state] || s.state;
+    $('current').textContent = s.current?.label || 'No playback';$('queued').textContent = s.queue;$('pulse').classList.toggle('active', s.state !== 'idle');
+    $('mqtt').textContent = s.mqtt === 'disabled' ? 'MQTT disabled' : `MQTT: ${{connected:'connected', connecting:'connecting…', disconnected:'disconnected', 'subscription failed':'subscription failed'}[s.mqtt] || s.mqtt}`;
     renderHistory(s);
-  } catch { $('connection').textContent = 'Nicht erreichbar';$('connection').classList.add('offline'); }
+  } catch { $('connection').textContent = 'Unavailable';$('connection').classList.add('offline'); }
   finally {polling = false;}
 }
 async function init() {
-  try {const [sounds, settings] = await Promise.all([request('/api/sounds'), request('/api/config')]);config = settings;renderSounds(sounds);$('limits').textContent = `Max. ${settings.max_file_size_mb} MiB · ${settings.max_audio_duration_seconds} s Audio`;$('version').textContent = `snapnotify ${settings.version}`;}
-  catch (error) {feedback('sounds-feedback', 'Konfiguration konnte nicht geladen werden. Seite neu laden.', true);}
+  try {const [sounds, settings] = await Promise.all([request('/api/sounds'), request('/api/config')]);config = settings;renderSounds(sounds);$('limits').textContent = `Up to ${settings.max_file_size_mb} MiB · ${settings.max_audio_duration_seconds} s audio`;$('version').textContent = `snapnotify ${settings.version}`;}
+  catch (error) {feedback('sounds-feedback', 'Could not load settings. Reload the page.', true);}
   poll();setInterval(() => {if (!document.hidden) poll();}, 1000);document.addEventListener('visibilitychange', () => {if (!document.hidden) poll();});
 }
 init();

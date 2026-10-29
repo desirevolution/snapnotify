@@ -7,7 +7,7 @@ for arch in amd64 arm64; do
   mkdir -p "dist/$package/sounds"
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -buildvcs=false -trimpath \
     -ldflags="-s -w -X main.version=$VERSION" -o "dist/$package/snapnotify" .
-  cp README.md THIRD_PARTY.md THIRD_PARTY_NOTICES.txt config.example.yaml snapserver.stream.conf "dist/$package/"
+  cp README.md THIRD_PARTY.md THIRD_PARTY_NOTICES.txt config.example.yaml snapserver.stream.conf compose.yml "dist/$package/"
   tar -C dist -czf "dist/$package.tar.gz" "$package"
 done
 (cd dist && sha256sum ./*.tar.gz > checksums.txt)

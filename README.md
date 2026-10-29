@@ -1,63 +1,89 @@
 # snapnotify
 
-Kleiner Notification-Service für **Snapcast, optional mit MPD-Anbindung**, mit Web-UI, HTTP und optional MQTT. Unterstützt MP3, PCM-WAV und Ogg Vorbis. Die Decoder laufen in Go; kein FFmpeg, ALSA, CGO oder Audio-Gerät im Container erforderlich.
+Play audio notifications through Snapcast using a web UI, HTTP or MQTT. Supports local files, URLs and uploads. MPD pause/resume is optional.
 
-## Verhalten
+- MP3 (MPEG-1/2/2.5 Layer III), PCM WAV and Ogg Vorbis.
+- One playback queue for all inputs.
+- Temporary notification volume, with previous client volumes and streams restored afterwards.
+- Single Go binary with an embedded UI. No FFmpeg or audio device required.
 
-- Eine Notification erreicht alle zu Beginn des Wiedergabeblocks verbundenen, nicht stummgeschalteten Clients. Stummgeschaltete Gruppen und Clients bleiben stumm. Während eines Blocks neu verbundene Clients werden nicht nachträglich übernommen.
-- Dateien werden vor dem Einreihen vorbereitet und auf **48 kHz, 16 Bit, Stereo, Little Endian** gebracht. Lokale Sounds, URLs und Uploads werden jeweils vollständig decodiert; es gibt keinen PCM-Cache. Ungültige Dateien unterbrechen keine Musik.
-- Eine FIFO-Warteschlange, ohne Prioritäten, Wiederholungen oder Persistenz. Ihre Reihenfolge entspricht dem erfolgreichen Abschluss der Vorbereitung; ein langsamer Download kann von einer später gestarteten kleinen Datei überholt werden.
-- Vor einem Wiedergabeblock: MPD bei laufender Wiedergabe pausieren, Gruppen auf `notifications` schalten, alte Audiopuffer bei bisheriger Lautstärke leeren, Notification-Lautstärke setzen.
-- Mehrere bereits wartende Notifications laufen im selben Block. Danach werden die Audio-Puffer durch Stille geleert und ursprüngliche Client-Lautstärken sowie Stream-Zuordnungen wiederhergestellt. MPD wird nur fortgesetzt, wenn es von snapnotify pausiert wurde und weiterhin am erwarteten Titel/Abspielpunkt pausiert ist.
-- Sichtbare manuelle Änderungen an Client-Lautstärke, Mute und Gruppenzuordnung werden bei der Wiederherstellung respektiert. Eine Änderung zurück auf exakt denselben Wert kann nicht von einem unveränderten Zustand unterschieden werden.
-- HTTP `202` bedeutet **vorbereitet und eingereiht**, nicht erfolgreich abgespielt. Wiedergabefehler stehen im Log und in `/api/status` sowie der Web-UI. Die letzten 20 Ergebnisse und der letzte Fehler bleiben bis zum Neustart oder bis zum Leeren über die UI/API sichtbar.
-- Temporäre Job-Dateien werden nach Wiedergabe/Fehler gelöscht. SIGTERM/SIGINT bricht die Wiedergabe ab und versucht, den vorherigen Zustand wiederherzustellen. Bei hartem Prozessabbruch oder unerreichbaren Diensten ist eine Wiederherstellung nicht garantiert; der Zustand wird nicht auf Platte gesichert.
+## Quick start
 
-## Docker starten
-
-1. `config.example.yaml` nach `config.yaml` kopieren. Adressen und Lautstärke anpassen.
-2. Lokale Sounds in `sounds/` legen und unter `sounds:` IDs zuordnen. Pfade sind relativ zu `audio.directory`; dieses Verzeichnis ist relativ zur Config-Datei. Änderungen an der YAML werden beim Neustart übernommen.
-3. Den `[stream]`-Abschnitt von Snapserver gemäß `snapserver.stream.conf` anpassen und Snapserver neu starten. Die MPD-FIFO-Konfiguration bleibt unverändert.
-4. Snapnotify und Snapserver mit demselben Docker-Netzwerk verbinden; MPD nur bei aktivierter MPD-Anbindung ebenfalls verbinden. Die Compose-Datei erwartet ein bereits bestehendes Netzwerk namens `audio`; dessen Namen über `AUDIO_NETWORK` anpassen. Snapserver muss darin als `snapserver` erreichbar sein oder die Config entsprechend ändern. MPD wird nur verwendet, wenn `mpd.address` ausdrücklich gesetzt ist, beispielsweise auf `mpd:6600`.
-5. Starten:
+1. Copy `config.example.yaml` to `config.yaml` and set the Snapserver addresses.
+2. Add a notification source to Snapserver, as shown below.
+3. Connect snapnotify and Snapserver to the same Docker network. The Compose files use an existing network named `audio`. Create it if needed and attach Snapserver to it, or set `AUDIO_NETWORK` to your existing network name.
+4. Put audio files in `sounds/` and add their IDs to the configuration. URLs and uploads work without configured files.
+5. Start the published image:
 
 ```sh
 cp config.example.yaml config.yaml
-# config.yaml bearbeiten und Snapserver entsprechend konfigurieren
-AUDIO_NETWORK=dein_bestehendes_netzwerk docker compose up -d --build
-docker compose logs -f snapnotify
+# Edit config.yaml before starting.
+docker compose -f compose.yml pull
+docker compose -f compose.yml up -d
 ```
 
-Die UI ist unter **http://localhost:8080** erreichbar. Compose bindet absichtlich an `127.0.0.1`; für den Zugriff aus dem LAN in `compose.yaml` die linke Adresse auf die LAN-IP des Hosts setzen oder einen internen Reverse Proxy verwenden. Der Dienst hat keine Anmeldung und ist für ein vertrauenswürdiges internes Netz gedacht. URLs dürfen auch interne HTTP-/HTTPS-Server erreichen. Es gibt keine CORS-Freigabe; fremde Browser-Origins werden für Schreibzugriffe abgewiesen.
+Open [http://localhost:8080](http://localhost:8080). The service has no authentication and is intended for a trusted internal network. The default port binding is localhost only; change it to the host's LAN address or use an internal reverse proxy for remote access.
 
-Benötigte Verbindungen innerhalb des Docker-Netzwerks:
+`compose.yml` uses `ghcr.io/desirevolution/snapnotify:latest`. To update, repeat the `pull` and `up` commands. Keep your configuration and sound files.
 
-| Ziel | Port | Zweck |
-|---|---:|---|
-| Snapserver | 1705/TCP | JSON-RPC-Steuerung |
-| Snapserver | 4953/TCP | Notification-Audio an `notifications` |
-| MPD, optional | 6600/TCP | Status, Pause, Fortsetzen bei gesetzter Adresse |
-| MQTT-Broker, optional | 1883/TCP bzw. 8883/TCP | Trigger |
+For a local build instead:
 
-Snapservers TCP-Steuerung im Abschnitt `[tcp]` muss aktiviert und für snapnotify erreichbar sein (`enabled = true`, `bind_to_address = 0.0.0.0`, `port = 1705`). Diese internen Ports müssen nicht am Docker-Host veröffentlicht werden. Audio- und Steueradresse müssen zum selben Snapserver gehören. `notifications` gehört exklusiv snapnotify; den bisherigen Test-Sender nicht parallel betreiben. Nur eine snapnotify-Instanz pro Snapserver verwenden.
+```sh
+docker compose -f compose.dev.yml up -d --build
+```
 
-Dein bisheriger Aufbau bleibt erhalten:
+Both Compose files are standalone alternatives. Do not combine them. Configuration and sound files must be readable by container user `65532:65532`. Create `config.yaml` as a file before starting; configuration changes require a restart.
+
+### Snapserver
+
+Enable TCP control and add a dedicated audio input in `snapserver.conf`, keeping any existing sources:
 
 ```ini
-source = pipe:///tmp/snapfifo?name=mpd&codec=null
+[tcp]
+enabled = true
+bind_to_address = 0.0.0.0
+port = 1705
+
+[stream]
 source = tcp://0.0.0.0:4953?name=notifications&codec=flac&sampleformat=48000:16:2
-source = meta:///notifications/mpd?name=Mixed&codec=flac
 ```
 
-Wesentliche Änderung: `notifications` bekommt **`codec=flac`** statt `null`, damit Gruppen direkt auf den Stream umgeschaltet werden können. `Mixed` darf weiterhin `notifications` vor `mpd` priorisieren. Der Service schaltet die hörbaren Gruppen für die Notification explizit auf `notifications` und anschließend wieder auf ihren vorherigen Stream.
+Restart Snapserver after editing. Match these settings in snapnotify:
 
-Gemountete Dateien müssen für UID/GID `65532:65532` lesbar sein; üblicherweise Verzeichnisse `755`, Audiodateien `644`. Für Config-Dateien mit Kennwörtern geeignete Gruppenrechte verwenden. MQTT- und MPD-Kennwörter können alternativ über `SNAPNOTIFY_MQTT_PASSWORD` und `SNAPNOTIFY_MPD_PASSWORD` gesetzt werden. Bei MQTT-TLS (`ssl://…`) werden Zertifikate gegen die System-CA geprüft; private CAs im Image/Container ergänzen.
+```yaml
+snapcast:
+  control_address: snapserver:1705
+  audio_address: snapserver:4953
+  stream: notifications
+  buffer_ms: 350
+  settle_ms: 150
+```
 
-## Optionale MPD-Anbindung
+Port `1705` is for control and `4953` receives raw 48 kHz, 16-bit stereo PCM. FLAC is used for Snapserver-to-client transport. These ports only need to be reachable inside the Docker network. Reserve the notification source for one snapnotify instance.
 
-Ohne `mpd:`-Abschnitt oder mit `mpd.address: ""` wird keine MPD-Verbindung aufgebaut. Notifications funktionieren ausschließlich über Snapcast; die ursprünglichen Stream-Zuordnungen und Lautstärken werden weiterhin wiederhergestellt. Andere Audioquellen laufen währenddessen im Hintergrund weiter.
+Set `buffer_ms` to Snapserver's configured buffer. `settle_ms` adds time for switching and draining audio. Smaller values reduce delay but can cause clipped audio on some setups.
 
-Soll snapnotify MPD pausieren und anschließend fortsetzen, ausdrücklich konfigurieren:
+See `snapserver.stream.conf` for an example combining notifications and an MPD FIFO through a priority stream. Keep normal playback groups on their music/combined stream; snapnotify temporarily switches them to the notification source.
+
+## Configuration
+
+All options and defaults are listed in `config.example.yaml`. Unknown options are rejected.
+
+```yaml
+audio:
+  directory: ./sounds
+  volume: 60
+
+sounds:
+  doorbell: doorbell.mp3
+  mail: mail.ogg
+```
+
+The audio directory is relative to the configuration file. Sound paths are relative to that directory. Each sound ID can be triggered through the UI, HTTP or MQTT.
+
+Default limits are 20 queued notifications, 20 MiB per file, 120 seconds of audio and a 30-second URL preparation timeout. Files are decoded before entering the queue. Unsupported formats, including Ogg Opus, are rejected.
+
+MPD is disabled unless an address is set:
 
 ```yaml
 mpd:
@@ -65,131 +91,97 @@ mpd:
   password: ""
 ```
 
-Ist eine Adresse gesetzt, aber MPD nicht erreichbar, wird die Notification mit einem Fehler abgebrochen. Es gibt dann keinen stillen Fallback auf Wiedergabe ohne Pause.
+With MPD configured, playing music is paused for notifications and resumed afterwards if the expected paused state is unchanged. An unreachable configured MPD produces a playback error. Without MPD configuration, other audio sources continue in the background.
 
-Ohne MPD genügt auf Snapserver die Notification-Quelle:
+MQTT is also optional:
 
-```ini
-[stream]
-default_source = notifications
-source = tcp://0.0.0.0:4953?name=notifications&codec=flac&sampleformat=48000:16:2
+```yaml
+mqtt:
+  enabled: true
+  broker: tcp://mosquitto:1883
+  topic: notifications/play
+  client_id: snapnotify
 ```
 
-## Aktualisierung von v0.1.1-dev
+Use `ssl://host:8883` for TLS with system CA verification. Set credentials in the configuration or override passwords through `SNAPNOTIFY_MQTT_PASSWORD` and `SNAPNOTIFY_MPD_PASSWORD`.
 
-- Einen vorhandenen `cache:`-Abschnitt aus der Config entfernen; Cache, Vorladen und Cache-Statistiken sind vollständig entfernt.
-- Die neue Beispielkonfiguration nutzt `notifications` als Streamname. Bestehendes `snapcast.stream: c1` funktioniert weiterhin. Wenn du umbenennst, sowohl die Snapserver-Quelle samt Meta-Verweis als auch `snapcast.stream` in snapnotify ändern.
-- MPD ist ohne Adresse standardmäßig deaktiviert. Eine bereits ausdrücklich gesetzte Adresse bleibt wirksam.
-- Eigene Config, Sounds und Compose-Anpassungen behalten. Danach neu bauen und starten.
+## Usage
 
-## Web-UI
+The UI supports configured sounds, direct URLs and single-file uploads. Volume changes apply to the next notification and reset to the configured value on restart. **Clear** removes recent notifications and the last error without interrupting playback or changing the queue.
 
-- **Sounds:** konfigurierte IDs mit Dateiname und Abspielen-Button.
-- **URL:** direkte HTTP-/HTTPS-Datei herunterladen und einreihen.
-- **Upload:** genau eine Datei auswählen/ablegen und einmalig abspielen. Kein dauerhaftes Hinzufügen zur Konfiguration.
-- **Lautstärke:** globaler Wert `0..100`, gilt ab der nächsten Notification, auch innerhalb einer Warteschlange. Änderungen während eines laufenden Sounds verändern diesen nicht. Bei einem Wechsel zwischen Sounds werden zuerst die alten Puffer geleert.
-- Status und Warteschlangenlänge werden etwa sekündlich aktualisiert.
-- **Letzte Meldungen → Leeren:** löscht die Historie und den letzten Fehler. Laufende Wiedergabe und Warteschlange bleiben erhalten; später abgeschlossene Jobs erscheinen wieder als neue Meldung.
-
-Die über UI/API eingestellte Lautstärke ist **flüchtig**. Nach einem Neustart gilt wieder `audio.volume` aus der YAML. Bei unterschiedlicher Hardware ergibt derselbe Prozentwert nicht zwingend dieselbe wahrgenommene Lautstärke.
-
-## HTTP-API
-
-### Konfigurierte Datei
+### HTTP
 
 ```sh
+# Play a configured sound.
 curl -X POST http://localhost:8080/play/doorbell
-```
 
-### URL
-
-```sh
+# Download and play an audio file.
 curl -X POST http://localhost:8080/play-url \
   -H 'Content-Type: application/json' \
-  -d '{"url":"http://homeassistant:8123/local/gong.mp3"}'
-```
+  -d '{"url":"https://example.org/notification.mp3"}'
 
-Nur HTTP/HTTPS, keine Zugangsdaten in der URL, maximal fünf Weiterleitungen. Der Download ist endlich und vollständig; keine Radio-/HLS-Streams, Playlists, Cookies oder eigenen Auth-Header. Die URL-Abfrageparameter werden nicht im Jobnamen angezeigt.
+# Upload and play a file.
+curl -X POST http://localhost:8080/play-file -F 'file=@notification.wav'
 
-### Datei-Upload
-
-```sh
-curl -X POST http://localhost:8080/play-file -F 'file=@./gong.wav'
-```
-
-### Notification-Lautstärke
-
-```sh
-curl http://localhost:8080/api/volume
+# Set notification volume for subsequent playback.
 curl -X PUT http://localhost:8080/api/volume \
   -H 'Content-Type: application/json' -d '{"volume":65}'
 ```
 
-`GET` liefert `volume` und `default_volume`. `PUT` bestätigt `applies: "next_notification"` und `persistent: false`. Dies ändert die Notification-Lautstärke, nicht dauerhaft die Lautstärken deiner Snapclients.
+Playback requests return `202` once the audio is prepared and queued. Later playback errors appear in the UI, status endpoint and logs. Error responses use `{"error":"message"}`.
 
-### Status
-
-| Endpunkt | Antwort |
+| Endpoint | Purpose |
 |---|---|
-| `GET /healthz` | Prozess erreichbar; kein Verfügbarkeitstest von MPD/Snapserver |
-| `GET /api/sounds` | konfigurierte IDs und Dateinamen |
-| `DELETE /api/history` | Historie und letzten Fehler leeren; aktive Wiedergabe/Warteschlange bleiben erhalten |
-| `GET /api/status` | Zustand, aktueller Job, Warteschlangenlänge, Laufzeit-Lautstärke, MQTT-Zustand, letzte Ergebnisse/Fehler |
-| `GET /api/config` | öffentliche Limits, Lautstärke und Version; keine Kennwörter |
+| `GET /api/sounds` | Configured sound IDs and filenames |
+| `GET /api/status` | Playback, queue, MQTT status and recent results |
+| `GET /api/volume` | Current and configured default volume |
+| `GET /api/config` | Public settings and version |
+| `DELETE /api/history` | Clear recent results and the last error |
+| `GET /healthz` | Process health; does not check external services |
 
-Ein erfolgreicher Abspielaufruf liefert beispielsweise:
+URLs must point to finite HTTP/HTTPS audio files, without embedded credentials. Internal URLs are allowed. Uploads and downloads are temporary and deleted after playback or failure.
 
-```json
-{"status":"queued","job":{"id":"…","label":"doorbell","duration_seconds":1.2}}
-```
+### MQTT
 
-Fehlerformat: `{"error":"…"}`. Statuscodes: `400` ungültige Anfrage, `403` fremder Browser-Origin, `404` unbekannte ID, `413` zu große Datei, `422` nicht unterstützte/defekte/zu lange Audiodatei, `429` volle Warteschlange, `502` Downloadfehler, `503` Service stoppt oder zwei Dateien werden bereits vorbereitet, `500` interner/Dateizugriffsfehler. Zwei Vorbereitungen dürfen parallel laufen; sie zählen zusätzlich zur konfigurierten Warteschlange. Snapserver-/MPD-Verbindungsfehler treten nach `202` im Worker auf und erscheinen im Status.
-
-## MQTT
-
-In der YAML `mqtt.enabled: true` setzen. Trigger als nackte ID:
+Publish a plain sound ID to the configured topic:
 
 ```sh
 mosquitto_pub -h localhost -t notifications/play -m doorbell -q 0
 ```
 
-QoS 0, Clean Session, keine gespeicherten Offline-Nachrichten; retained Nachrichten beim Abonnieren werden verworfen. Während einer Trennung verpasste Nachrichten werden nicht nachgeholt. Einzelne Trigger dürfen verloren gehen. Keine automatische Wiederholung und keine Deduplizierung. MQTT akzeptiert IDs, keine URLs oder Datei-Payloads. Fehler werden geloggt und im UI-Status protokolliert. `client_id` muss im Broker eindeutig sein.
+The client uses QoS 0 and a clean session. Retained messages are ignored and offline messages are not replayed. MQTT accepts IDs only.
 
-## Limits und Formate
+## Playback behavior
 
-Alle Limits stehen in der YAML: Standard **20 wartende Jobs**, **20 MiB Quelldatei**, **120 s decodiertes Audio**, **30 s Download-Timeout**. Der Timeout umfasst Download und anschließende Vorbereitung bei URL-Aufrufen. Ein zu langer Download/Stream oder eine zu große/zu lange Datei wird verworfen. MP3, übliches PCM-WAV und Ogg **Vorbis** werden anhand des Inhalts erkannt; Ogg Opus, AAC/M4A und FLAC sind nicht Teil dieser Version. Unterstützte Eingangs-Sampleraten: 8–192 kHz.
+Connected, unmuted clients in unmuted groups receive notifications. Previous streams and client volumes are restored at the end of a playback batch; detectable manual changes are preserved. Clients connecting mid-batch are not added.
 
-Der temporäre Speicherbedarf richtet sich nach der decodierten Dauer: Stereo-PCM benötigt rund **192 kB/s**. Bei Standardlimits sind rund 500 MiB PCM für die volle Warteschlange plus laufenden Job möglich. Compose verwendet ein auf 768 MiB begrenztes `/tmp`-tmpfs; bei größeren Limits entsprechend erhöhen. Der Mount wird bei Container-Neuerstellung verworfen. Bei nackten Binaries kann ein SIGKILL verwaiste Dateien im System-Tmp hinterlassen.
+The queue is kept in memory and follows the order in which preparation completes. There are no retries or priorities. Recent results and temporary volume settings also reset on restart. Graceful shutdown attempts to restore playback settings; a crash or an unavailable server can prevent restoration.
 
-## Binary / Entwicklung
+The Compose files provide a 768 MiB temporary filesystem. Increase it if raising file, duration or queue limits: decoded PCM uses about 192 kB per second. Start with a low volume and check playback on your clients, including short sounds and MPD radio streams.
 
-Linux amd64 und arm64; Go ab 1.27. Die Workflows und der Docker-Build verwenden Go 1.27.3.
+## Native binary
+
+Download the Linux archive for your architecture, extract it and create `config.yaml` from the example:
 
 ```sh
-go mod download
+./snapnotify -config config.yaml
+```
+
+The UI is served by the binary. No separate web server is needed.
+
+## Development and releases
+
+Requires Go 1.27 or newer. No frontend build is needed.
+
+```sh
 go vet ./...
 go test -race ./...
 CGO_ENABLED=0 go build -trimpath -o dist/snapnotify .
 ./dist/snapnotify -config config.yaml
 ```
 
-Die Web-Dateien werden eingebettet. Keine npm-Installation und kein Frontend-Build. Die Tests verwenden kurze synthetische Audiodateien aus `testdata/` und simulieren MPD/Snapcast über echte lokale TCP-Verbindungen. Sie prüfen Decoder, Resampling, Limits, HTTP, FIFO-Wiedergabe, Mute, Lautstärke und Wiederherstellung einschließlich Teilfehlern und Abbruch.
+Tests cover decoding, limits, HTTP, MQTT and playback control with local TCP test peers. An optional UI smoke test is in `scripts/ui-smoke.cjs` and requires JSDOM. Dependency licenses are in `THIRD_PARTY_NOTICES.txt`.
 
-MP3 wird mit `github.com/tphakala/go-mp3/pcm` decodiert, einschließlich MPEG-1, MPEG-2 und MPEG-2.5 Layer III sowie Mono/Stereo. Beep wird weiterhin für WAV/Vorbis und Resampling verwendet; der frühere MP3-Decoder wird nicht mehr in das Programm eingebunden. Die Decoder-Versionen sind festgeschrieben; Formate werden begrenzt und Dekodierfehler abgefangen. Lizenzen und Hinweise der eingebundenen Module stehen in `THIRD_PARTY_NOTICES.txt`.
+To publish, create a version such as `v0.3.0` under **GitHub → Releases** and select **Publish release**. The workflow builds a Linux amd64/arm64 container image and binary archives with SHA-256 checksums. It pushes the image to GHCR and attaches binaries to the published release. Stable releases update `latest`; prereleases do not. Tag pushes alone do not publish.
 
-## GitHub-Releases
-
-1. Projekt in ein GitHub-Repository namens `snapnotify` übernehmen. Die Workflows müssen im zu veröffentlichenden Commit vorhanden sein.
-2. In GitHub **Releases → Draft a new release** öffnen.
-3. Tag wie `v0.1.0` auswählen/erstellen und Release Notes eintragen oder von GitHub generieren lassen.
-4. **Publish release** klicken.
-
-Nur `release: published` startet die Veröffentlichung. Ein Tag-Push, Entwurf oder späteres Bearbeiten startet keinen neuen Release-Build. Prereleases wie `v0.2.0-rc.1` als Prerelease markieren.
-
-Der Workflow prüft den Code, erzeugt `snapnotify_<version>_linux_{amd64,arm64}.tar.gz` und SHA-256-Prüfsummen, veröffentlicht ein Multiarch-Image unter `ghcr.io/<owner>/<repo>` und hängt die Archive an den bereits veröffentlichten Release. Während der Workflow läuft, ist der Release daher zunächst ohne Binaries sichtbar. Stabile Releases erhalten Versions-/Minor-/Major-Tags und `latest`; Prereleases überschreiben `latest` nicht. Ein erneuter Workflow-Lauf ersetzt die Assets desselben Releases.
-
-Es reicht das eingebaute `GITHUB_TOKEN` mit `contents: write` und `packages: write`. Für öffentliche Image-Downloads nach dem ersten Push gegebenenfalls die GHCR-Package-Sichtbarkeit auf Public stellen. Organisationsrichtlinien müssen die verwendeten Actions und Paketveröffentlichung erlauben. CI läuft unabhängig davon auf Branch-Pushes und Pull Requests und veröffentlicht nichts.
-
-## Erster Test an deinem Setup
-
-Mit niedriger Lautstärke starten und prüfen: lokale MPD-Datei, Internetradio, bereits pausiertes MPD, stummgeschalteter Client, zwei wartende Meldungen, Lautstärkeänderung und SIGTERM während einer Meldung. Vor allem Anfang/Ende des Tons und das Radio-Fortsetzen müssen am echten System geprüft werden. `buffer_ms` muss deinem Snapserver-Puffer entsprechen; bei hörbar abgeschnittenen Sounds `settle_ms` erhöhen. Internetradio hat keinen garantierten zeitversetzten Wiedereinstieg; das Verhalten hängt von MPD und dem Sender ab.
+The workflow uses `GITHUB_TOKEN`. Enable package publishing and make the GHCR package public for unauthenticated image pulls. Normal CI runs on branch pushes and pull requests without publishing.
